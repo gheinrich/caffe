@@ -14,6 +14,7 @@ void SoftmaxWithLossLayer<Dtype>::LayerSetUp(
     const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
   LossLayer<Dtype>::LayerSetUp(bottom, top);
   LayerParameter softmax_param(this->layer_param_);
+  LayerParameter softmaxwithloss_param(this->layer_param_);
   softmax_param.set_type("Softmax");
   softmax_layer_ = LayerRegistry<Dtype>::CreateLayer(softmax_param);
   softmax_bottom_vec_.clear();
@@ -28,6 +29,8 @@ void SoftmaxWithLossLayer<Dtype>::LayerSetUp(
     ignore_label_ = this->layer_param_.loss_param().ignore_label();
   }
   normalize_ = this->layer_param_.loss_param().normalize();
+
+  margin_ = this->layer_param_.softmaxwithloss_param().margin();
 }
 
 template <typename Dtype>
@@ -68,8 +71,13 @@ void SoftmaxWithLossLayer<Dtype>::Forward_cpu(
       }
       DCHECK_GE(label_value, 0);
       DCHECK_LT(label_value, prob_.shape(softmax_axis_));
-      loss -= log(std::max(prob_data[i * dim + label_value * inner_num_ + j],
-                           Dtype(FLT_MIN)));
+
+      float prob = std::max(prob_data[i * dim + label_value * inner_num_ + j],
+                           Dtype(FLT_MIN));
+
+      // apply margin (don't accumulate any loss if prob >= 1 - margin)
+      if (prob < 1 - margin_ )
+        loss -= log(prob);
       ++count;
     }
   }
@@ -97,6 +105,7 @@ void SoftmaxWithLossLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
     const Dtype* label = bottom[1]->cpu_data();
     int dim = prob_.count() / outer_num_;
     int count = 0;
+    // TODO: take account of margin here (CPU version)
     for (int i = 0; i < outer_num_; ++i) {
       for (int j = 0; j < inner_num_; ++j) {
         const int label_value = static_cast<int>(label[i * inner_num_ + j]);
